@@ -17,6 +17,9 @@ spring:
   session:
     store-type: redis
     timeout: 2592000
+  devtools:
+    restart:
+      enabled: false
 server:
   port: 8123
   servlet:
