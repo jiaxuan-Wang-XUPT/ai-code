@@ -2,11 +2,13 @@ package com.skye.skyeaicode.common;
 
 import java.io.Serializable;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 /**
  * 通用返回类
  */
 @Data
+@NoArgsConstructor
 public class BaseResponse<T> implements Serializable {
 
     private int code;

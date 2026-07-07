@@ -2,11 +2,14 @@ package com.skye.skyeaicode.ai;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.skye.skyeaicode.ai.guardrail.PromptSafetyInputGuardrail;
+import com.skye.skyeaicode.ai.guardrail.RetryOutputGuardrail;
 import com.skye.skyeaicode.ai.tools.*;
 import com.skye.skyeaicode.exception.BusinessException;
 import com.skye.skyeaicode.exception.ErrorCode;
 import com.skye.skyeaicode.model.enums.CodeGenTypeEnum;
 import com.skye.skyeaicode.service.ChatHistoryService;
+import com.skye.skyeaicode.utils.SpringContextUtil;
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
@@ -40,20 +43,14 @@ import java.time.Duration;
 @Slf4j
 public class AiCodeGeneratorServiceFactory {
 
-    @Resource
+    @Resource(name = "openAiChatModel")
     private ChatModel chatModel;
-
-    @Resource
-    private StreamingChatModel streamingChatModel;
 
     @Resource
     private RedisChatMemoryStore redisChatMemoryStore;
 
     @Resource
     private ChatHistoryService chatHistoryService;
-
-    @Resource
-    private StreamingChatModel reasoningStreamingChatModel;
 
     @Resource
     private ToolManager toolManager;
@@ -112,26 +109,39 @@ public class AiCodeGeneratorServiceFactory {
         // 从数据库加载历史对话到记忆中
         chatHistoryService.loadChatHistoryToMemory(appId, chatMemory, 20);
         // 根据代码生成类型选择不同的模型配置
+        // 根据代码生成类型选择不同的模型配置
         return switch (codeGenType) {
-            // Vue 项目生成使用推理模型
-            case VUE_PROJECT -> AiServices.builder(AiCodeGeneratorService.class)
-                    .streamingChatModel(reasoningStreamingChatModel)
-                    .chatMemoryProvider(memoryId -> chatMemory)
-                    .tools(toolManager.getAllTools())
-                    .hallucinatedToolNameStrategy(toolExecutionRequest -> ToolExecutionResultMessage.from(
-                            toolExecutionRequest, "Error: there is no tool called " + toolExecutionRequest.name()
-                    ))
-                    .build();
-
-            // HTML 和多文件生成使用默认模型
-            case HTML, MULTI_FILE -> AiServices.builder(AiCodeGeneratorService.class)
-                    .chatModel(chatModel)
-                    .streamingChatModel(streamingChatModel)
-                    .chatMemory(chatMemory)
-                    .build();
+            case VUE_PROJECT -> {
+                // 使用多例模式的 StreamingChatModel 解决并发问题
+                StreamingChatModel reasoningStreamingChatModel = SpringContextUtil.getBean("reasoningStreamingChatModelPrototype", StreamingChatModel.class);
+                yield AiServices.builder(AiCodeGeneratorService.class)
+                        .streamingChatModel(reasoningStreamingChatModel)
+                        .chatMemoryProvider(memoryId -> chatMemory)
+                        .tools(toolManager.getAllTools())
+                        .hallucinatedToolNameStrategy(toolExecutionRequest -> ToolExecutionResultMessage.from(
+                                toolExecutionRequest, "Error: there is no tool called " + toolExecutionRequest.name()
+                        ))
+                        .inputGuardrails(new PromptSafetyInputGuardrail()) //添加护轨
+//                        .outputGuardrails(new RetryOutputGuardrail()) 如果使用输出护轨，可能导致和流式输出冲突，为了流式输出，这里不启用
+                        .maxSequentialToolsInvocations(10) //最多连续调用10次工具
+                        .build();
+            }
+            case HTML, MULTI_FILE -> {
+                // 使用多例模式的 StreamingChatModel 解决并发问题
+                StreamingChatModel openAiStreamingChatModel = SpringContextUtil.getBean("streamingChatModelPrototype", StreamingChatModel.class);
+                yield AiServices.builder(AiCodeGeneratorService.class)
+                        .chatModel(chatModel)
+                        .streamingChatModel(openAiStreamingChatModel)
+                        .chatMemory(chatMemory)
+                        .inputGuardrails(new PromptSafetyInputGuardrail()) //添加护轨
+//                        .outputGuardrails(new RetryOutputGuardrail())
+                        .maxSequentialToolsInvocations(10) //最多连续调用10次工具
+                        .build();
+            }
             default -> throw new BusinessException(ErrorCode.SYSTEM_ERROR,
                     "不支持的代码生成类型: " + codeGenType.getValue());
         };
+
     }
 
 

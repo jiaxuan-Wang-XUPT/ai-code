@@ -8,6 +8,7 @@ import cn.hutool.core.util.StrUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.skye.skyeaicode.ai.AiCodeGenTypeRoutingService;
+import com.skye.skyeaicode.ai.AiCodeGenTypeRoutingServiceFactory;
 import com.skye.skyeaicode.constant.AppConstant;
 import com.skye.skyeaicode.core.AiCodeGeneratorFacade;
 import com.skye.skyeaicode.core.builder.VueProjectBuilder;
@@ -64,7 +65,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App>  implements AppS
     @Resource
     private ScreenshotService screenshotService;
     @Resource
-    private AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService;
+    private AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
 
     @Override
     public AppVO getAppVO(App app) {
@@ -121,7 +122,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App>  implements AppS
         app.setUserId(loginUser.getId());
         // 应用名称暂时为 initPrompt 前 12 位
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
-        // 使用 AI 智能选择代码生成类型
+        // 使用 AI 智能选择代码生成类型(多例模式)
+        AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService = aiCodeGenTypeRoutingServiceFactory.createAiCodeGenTypeRoutingService();
         CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
         app.setCodeGenType(selectedCodeGenType.getValue());
         // 插入数据库
